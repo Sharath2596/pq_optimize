@@ -1,0 +1,74 @@
+let
+    // 1. Load only visible files from the folder
+    Source = Folder.Files("C:\Users\8216609\OneDrive - Standard Chartered Bank\Desktop\PB_Survey\2025\Qual\Apr"),
+    FilteredHiddenFiles = Table.SelectRows(Source, each [Attributes]?[Hidden]? <> true),
+
+    // 2. Apply transformation only to required files (delays evaluation)
+    Transform = Table.AddColumn(FilteredHiddenFiles, "Transform File", each #"Transform File"([Content]), type table),
+    RenamedColumns = Table.RenameColumns(Transform, {"Name", "Source.Name"}),
+    SelectedColumns = Table.SelectColumns(RenamedColumns, {"Source.Name", "Transform File"}),
+
+    // 3. Expand after all early filtering to reduce processing load
+    ExpandedTransform = Table.ExpandTableColumn(SelectedColumns, "Transform File", Table.ColumnNames(#"Transform File"(#"Sample File"))),
+
+    // 4. Enforce types only once after major transformations (for better performance)
+    Combined = Table.Combine({ExpandedTransform, #"RealTime"}),
+
+    // 5. Minimal transformations before joins (postpone to after joins where possible)
+    RemoveRMN = Table.RemoveColumns(Combined, {"RMN"}),
+
+    ChangeAgentIDType = Table.TransformColumnTypes(RemoveRMN, {{"AgentID", type text}}),
+
+    // 6. Join with Team List
+    JoinTeamList = Table.NestedJoin(ChangeAgentIDType, {"AgentID"}, #"Team List", {"logid"}, "Team List", JoinKind.LeftOuter),
+    ExpandTeamList = Table.ExpandTableColumn(JoinTeamList, "Team List", {"logid", "Emp Name", "Team Leader", "Manager", "Affluent", "Location"}),
+
+    // 7. Convert types only if necessary
+    ChangeCallActivityLogType = Table.TransformColumnTypes(ExpandTeamList, {{"CallActivityLog", type text}}),
+
+    // 8. Join with Response
+    JoinResponse = Table.NestedJoin(ChangeCallActivityLogType, {"CallActivityLog"}, Response, {"CallActivityLog"}, "Response", JoinKind.LeftOuter),
+    ExpandResponse = Table.ExpandTableColumn(JoinResponse, "Response", {"Response Type", "Officer CSAT", "(Group) Q4_NPS_GROUP", "NPS", "Query Resolution", "FCR", "CallActivityLog"}, {"Response Type", "Officer CSAT", "(Group) Q4_NPS_GROUP", "NPS", "Query Resolution", "FCR", "CallActivityLog.1"}),
+
+    // 9. Remove duplicates early
+    RemoveDuplicates = Table.Distinct(ExpandResponse, {"CallActivityLog"}),
+
+    // 10. Replace null with default values
+    ReplaceNulls = Table.ReplaceValue(RemoveDuplicates, null, "No Response", Replacer.ReplaceValue, {"(Group) Q4_NPS_GROUP"}),
+
+    // 11. Remove unnecessary columns before filtering
+    RemoveSourceName = Table.RemoveColumns(ReplaceNulls, {"Source.Name"}),
+
+    // 12. Filter rows early to reduce memory load
+    FilteredRows = Table.SelectRows(RemoveSourceName, each [CallMonth] <> "Mar" and [CallMonth] <> "3"),
+
+    // 13. Simplify survey type logic
+    AddSurveyType = Table.AddColumn(FilteredRows, "Survey trigger types", each if Text.Contains([CallType], "Survey POC") then "Real Time" else if Text.Select([CallMonth], {"0".."9"}) <> "" then "NRMN" else "RMN"),
+
+    // 14. Normalize segment values using single `ReplaceValue` call for speed
+    CleanSegment = List.Accumulate(
+        {
+            {"(blank)", "Personal"},
+            {"Premium Banking", "Premium"},
+            {"Personal Banking", "Personal"},
+            {"Priority Banking", "Priority"},
+            {"Business Banking", "Business"}
+        },
+        AddSurveyType,
+        (state, current) => Table.ReplaceValue(state, current{0}, current{1}, Replacer.ReplaceText, {"Segment"})
+    ),
+
+    // 15. Add Final FCR column
+    AddFinalFCR = Table.AddColumn(CleanSegment, "Final FCR", each if [Query Resolution] = "Yes" and [FCR] = "Yes" then "Yes" else "No", type text),
+
+    // 16. Filter out null CallDate early
+    FilterValidCallDate = Table.SelectRows(AddFinalFCR, each [CallDate] <> null),
+
+    // 17. Derive week number and labels efficiently
+    AddWeek = Table.AddColumn(FilterValidCallDate, "Week of Month", each Date.WeekOfMonth([CallDate]), Int64.Type),
+    AddWeekLabel = Table.AddColumn(AddWeek, "Weekly", each "Week " & Text.From(Number.RoundDown(Number.Min([Week of Month], 4))), type text),
+
+    // 18. Remove temporary columns
+    Final = Table.RemoveColumns(AddWeekLabel, {"Week of Month"})
+in
+    Final
