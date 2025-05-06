@@ -1,97 +1,31 @@
-let
-    // Load files from target folder
-    Source = Folder.Files("C:\Users\8216609\OneDrive - Standard Chartered Bank\Desktop\PB_Survey\2025\Qual\Apr"),
-    FilteredFiles = Table.SelectRows(Source, each [Attributes]?[Hidden]? <> true),
+Private Sub Workbook_Open()
+    With Application
+        .ExecuteExcel4Macro "SHOW.TOOLBAR(""Ribbon"", False)" ' Hide ribbon
+        .DisplayFormulaBar = False
+        .DisplayStatusBar = False
+    End With
+    
+    With ActiveWindow
+        .DisplayGridlines = False
+        .DisplayHeadings = False
+        .DisplayWorkbookTabs = False
+        .WindowState = xlMaximized
+        .Zoom = 90 ' Set zoom to 90%
+    End With
+End Sub
 
-    // Transform and expand files
-    TransformData = Table.AddColumn(FilteredFiles, "Data", each #"Transform File"([Content])),
-    SampleColumns = Table.ColumnNames(#"Transform File"(#"Sample File")),
-    ExpandedData = Table.ExpandTableColumn(TransformData, "Data", SampleColumns),
-    RenamedWithSource = Table.AddColumn(ExpandedData, "Source.Name", each [Name]),
+Private Sub Workbook_BeforeClose(Cancel As Boolean)
+    ' Restore UI elements when closing
+    With Application
+        .ExecuteExcel4Macro "SHOW.TOOLBAR(""Ribbon"", True)"
+        .DisplayFormulaBar = True
+        .DisplayStatusBar = True
+    End With
 
-    // Change data types
-    TypedData = Table.TransformColumnTypes(RenamedWithSource, {
-        {"Source.Name", type text}, {"CallDate", type date}, {"CallTime", type datetime},
-        {"CustomerID", type text}, {"CustomerIDTxt", type text}, {"ProductType", type text},
-        {"AgentID", Int64.Type}, {"PrimaryCallType", type text}, {"SecondaryCallType", type text},
-        {"CallType", type text}, {"ConnectionID", Int64.Type}, {"Duration", Int64.Type},
-        {"LOB", type text}, {"SupervisorID", Int64.Type}, {"ManagerID", Int64.Type},
-        {"CallActivityLog", Int64.Type}, {"Email", type any}, {"Segment", type text},
-        {"First Name", type text}, {"CallMonth", type text}, {"CallYear", Int64.Type}
-    }),
-
-    // Combine with real-time table
-    Appended = Table.Combine({TypedData, #"RealTime"}),
-
-    // Remove unnecessary column early
-    Cleaned = Table.RemoveColumns(Appended, {"RMN"}),
-
-    // Convert AgentID to text before join for consistency
-    AgentIDToText = Table.TransformColumnTypes(Cleaned, {{"AgentID", type text}}),
-
-    // Join with Team List (buffered for performance)
-    BufferedTeamList = Table.Buffer(#"Team List"),
-    JoinedTeam = Table.NestedJoin(AgentIDToText, {"AgentID"}, BufferedTeamList, {"logid"}, "TeamList", JoinKind.LeftOuter),
-    ExpandedTeam = Table.ExpandTableColumn(JoinedTeam, "TeamList", {
-        "logid", "Emp Name", "Team Leader", "Manager", "Affluent", "Location"
-    }),
-
-    // Convert CallActivityLog to text before join
-    CallActivityLogText = Table.TransformColumnTypes(ExpandedTeam, {{"CallActivityLog", type text}}),
-
-    // Join with Response (buffered for performance)
-    BufferedResponse = Table.Buffer(Response),
-    JoinedResponse = Table.NestedJoin(CallActivityLogText, {"CallActivityLog"}, BufferedResponse, {"CallActivityLog"}, "Response", JoinKind.LeftOuter),
-    ExpandedResponse = Table.ExpandTableColumn(JoinedResponse, "Response", {
-        "Response Type", "Officer CSAT", "(Group) Q4_NPS_GROUP", "NPS", "Query Resolution", "FCR"
-    }),
-
-    // Deduplicate on CallActivityLog
-    Deduplicated = Table.Distinct(ExpandedResponse, {"CallActivityLog"}),
-
-    // Replace null NPS group with "No Response"
-    ReplaceNullNPS = Table.ReplaceValue(Deduplicated, null, "No Response", Replacer.ReplaceValue, {"(Group) Q4_NPS_GROUP"}),
-
-    // Filter for April only
-    FilteredApril = Table.SelectRows(ReplaceNullNPS, each [CallMonth] = "Apr" or [CallMonth] = "4"),
-
-    // Add survey trigger logic
-    AddSurveyTrigger = Table.AddColumn(FilteredApril, "Survey trigger types", each 
-        if Text.Contains([CallType], "Survey POC") then "Real Time" 
-        else if List.MatchesAny(Text.ToList([CallMonth]), each Text.Select(_, {"0".."9"}) <> "") then "NRMN" 
-        else "RMN"
-    ),
-
-    // Segment standardization using mapping list
-    SegmentMap = {
-        {"(blank)", "Personal"}, {"Premium Banking", "Premium"}, 
-        {"Personal Banking", "Personal"}, {"Priority Banking", "Priority"}, 
-        {"Business Banking", "Business"}
-    },
-    NormalizedSegment = List.Accumulate(SegmentMap, AddSurveyTrigger, (state, pair) =>
-        Table.ReplaceValue(state, pair{0}, pair{1}, Replacer.ReplaceText, {"Segment"})
-    ),
-
-    // Add Final FCR
-    AddFinalFCR = Table.AddColumn(NormalizedSegment, "Final FCR", each 
-        if [Query Resolution] = "Yes" and [FCR] = "Yes" then "Yes" else "No", type text),
-
-    // Filter out rows without valid CallDate
-    FilteredValidDates = Table.SelectRows(AddFinalFCR, each ([CallDate] <> null)),
-
-    // Add week-of-month column, maxed at 4
-    AddWeek = Table.AddColumn(FilteredValidDates, "Weekly", each 
-        let week = Date.WeekOfMonth([CallDate])
-        in "Week " & Text.From(if week > 4 then 4 else week)
-    ),
-
-    // Drop unnecessary metadata columns
-    FinalResult = Table.RemoveColumns(AddWeek, {
-        "Source.Name", "Content", "Name", "Extension", 
-        "Date accessed", "Date modified", "Date created", 
-        "Attributes", "Folder Path"
-    })
-
-in
-    FinalResult
-
+    With ActiveWindow
+        .DisplayGridlines = True
+        .DisplayHeadings = True
+        .DisplayWorkbookTabs = True
+        .Zoom = 100 ' Reset zoom to default
+    End With
+End Sub
