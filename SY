@@ -1,31 +1,20 @@
-Private Sub Workbook_Open()
-    With Application
-        .ExecuteExcel4Macro "SHOW.TOOLBAR(""Ribbon"", False)" ' Hide ribbon
-        .DisplayFormulaBar = False
-        .DisplayStatusBar = False
-    End With
-    
-    With ActiveWindow
-        .DisplayGridlines = False
-        .DisplayHeadings = False
-        .DisplayWorkbookTabs = False
-        .WindowState = xlMaximized
-        .Zoom = 90 ' Set zoom to 90%
-    End With
-End Sub
+Sub ToggleRibbonAndTabs()
+    ' Toggle Ribbon
+    Dim ribbonVisible As Boolean
+    Static ribbonState As Boolean
 
-Private Sub Workbook_BeforeClose(Cancel As Boolean)
-    ' Restore UI elements when closing
-    With Application
-        .ExecuteExcel4Macro "SHOW.TOOLBAR(""Ribbon"", True)"
-        .DisplayFormulaBar = True
-        .DisplayStatusBar = True
-    End With
+    ' We'll use the sheet tab visibility as a proxy since Ribbon visibility isn't directly readable
+    ribbonVisible = ActiveWindow.DisplayWorkbookTabs
 
-    With ActiveWindow
-        .DisplayGridlines = True
-        .DisplayHeadings = True
-        .DisplayWorkbookTabs = True
-        .Zoom = 100 ' Reset zoom to default
-    End With
+    If ribbonVisible Then
+        ' Hide both
+        Application.ExecuteExcel4Macro "SHOW.TOOLBAR(""Ribbon"", False)"
+        ActiveWindow.DisplayWorkbookTabs = False
+        ribbonState = False
+    Else
+        ' Show both
+        Application.ExecuteExcel4Macro "SHOW.TOOLBAR(""Ribbon"", True)"
+        ActiveWindow.DisplayWorkbookTabs = True
+        ribbonState = True
+    End If
 End Sub
