@@ -1,20 +1,34 @@
-Sub ToggleRibbonAndTabs()
-    ' Toggle Ribbon
-    Dim ribbonVisible As Boolean
-    Static ribbonState As Boolean
+Sub ToggleFormulaProtection()
+    Dim ws As Worksheet
+    Dim cell As Range
+    Dim isProtected As Boolean
 
-    ' We'll use the sheet tab visibility as a proxy since Ribbon visibility isn't directly readable
-    ribbonVisible = ActiveWindow.DisplayWorkbookTabs
+    ' Check the status from the first sheet as a reference
+    isProtected = ThisWorkbook.Worksheets(1).ProtectContents
 
-    If ribbonVisible Then
-        ' Hide both
-        Application.ExecuteExcel4Macro "SHOW.TOOLBAR(""Ribbon"", False)"
-        ActiveWindow.DisplayWorkbookTabs = False
-        ribbonState = False
+    If isProtected Then
+        ' UNHIDE formulas and unprotect sheets
+        For Each ws In ThisWorkbook.Worksheets
+            ws.Unprotect Password:="secure123"
+            For Each cell In ws.UsedRange
+                If cell.HasFormula Then
+                    cell.Locked = False
+                    cell.FormulaHidden = False
+                End If
+            Next cell
+        Next ws
+        MsgBox "Formulas are now visible and sheets unprotected.", vbInformation
     Else
-        ' Show both
-        Application.ExecuteExcel4Macro "SHOW.TOOLBAR(""Ribbon"", True)"
-        ActiveWindow.DisplayWorkbookTabs = True
-        ribbonState = True
+        ' HIDE formulas and protect sheets
+        For Each ws In ThisWorkbook.Worksheets
+            For Each cell In ws.UsedRange
+                If cell.HasFormula Then
+                    cell.Locked = True
+                    cell.FormulaHidden = True
+                End If
+            Next cell
+            ws.Protect Password:="secure123", UserInterfaceOnly:=True
+        Next ws
+        MsgBox "Formulas are now hidden and sheets protected.", vbInformation
     End If
 End Sub
